@@ -40,6 +40,8 @@ from .native import Setup  # type: ignore[import]
 from .native import UpdateCounterArrays  # type: ignore[import]
 from .utils import path
 
+from .sanitizers.atheris_glue import install_into as _install_sanitizers
+_install_sanitizers(sys.modules[__name__])
 
 # PyInstaller Support
 # PyInstaller doesn't automatically support lazy imports, which happens because
