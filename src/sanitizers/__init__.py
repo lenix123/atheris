@@ -17,7 +17,7 @@ import os
 
 from collections.abc import Iterable
 
-from . import command, deserialization, models, path, sql, ssrf, code
+from . import command, deserialization, models, path, sql, ssrf, code_injection
 from .core import STATS, SanitizerIssue, guard_function, reset, set_stream
 from .taint import (
     contains_taint,
@@ -36,7 +36,7 @@ SANITIZERS = {
     "sql": sql.install,
     "deserialization": deserialization.install,
     "ssrf": ssrf.install,
-    "code": code.install,
+    "code": code_injection.install,
 }
 
 _installed: list[str] = []
