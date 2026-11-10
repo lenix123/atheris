@@ -21,7 +21,7 @@ from typing import Any, Callable, TextIO
 from .taint import contains_taint
 
 
-class SanitizerIssue(RuntimeError):
+class SanitizerIssue(BaseException):
     """Базовый класс находки санитайзера."""
 
 
@@ -90,6 +90,10 @@ def on_audit(event: str, handler: Callable[[tuple], None]) -> None:
 
 _patches: list[tuple[Any, str, Any]] = []
 
+# Проверки tainted-шаблонов для str.format / format_map (вызываются из
+# инструментированного кода, см. instrumentation._taint_method_call).
+FORMAT_CHECKS: list[Callable[[str], None]] = []
+
 
 def patch(owner: Any, name: str, replacement: Any) -> None:
 
@@ -106,6 +110,7 @@ def reset() -> None:
 
     _patches.clear()
     _audit_handlers.clear()
+    FORMAT_CHECKS.clear()
 
 
 _MISSING = object()

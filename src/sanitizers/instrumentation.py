@@ -16,14 +16,19 @@ AST-инструментация: распространение taint там, �
 from __future__ import annotations
 
 import ast
+import builtins
+import inspect
 import sys
+import textwrap
 
 from collections.abc import Iterable
+from functools import wraps
 from importlib.abc import MetaPathFinder
 from importlib.machinery import PathFinder, SourceFileLoader
 from types import CodeType
 from typing import Any
 
+from .core import FORMAT_CHECKS
 from .taint import (
     clean_prefix_of,
     make_tainted_str,
@@ -125,6 +130,11 @@ def _taint_method_call(receiver: Any, name: str, /, *args, **kwargs) -> Any:
             parts.append(item)
 
         return _concat(text, parts)
+
+    if FORMAT_CHECKS and name in ("format", "format_map"):
+
+        for check in tuple(FORMAT_CHECKS):
+            check(receiver)
 
     result = getattr(receiver, name)(*args, **kwargs)
 
@@ -295,35 +305,111 @@ def exec_instrumented(
     return namespace
 
 
+def instrument_function(function):
+    """
+    Декоратор: пересобирает функцию с taint-инструментацией.
+
+    Код harness (TestOneInput в запускаемом скрипте) import hook не
+    инструментирует, и f-строки / `%` / `.format()` там теряют метку.
+    Достаточно повесить декоратор:
+
+        @sanitizers.instrument_function
+        def TestOneInput(data): ...
+
+    Ограничения: нужен доступный исходник; замыкания не поддерживаются.
+    """
+
+    if function.__closure__:
+        raise ValueError("instrument_function does not support closures")
+
+    source = textwrap.dedent(inspect.getsource(function))
+
+    tree = ast.parse(source)
+
+    node = tree.body[0]
+
+    node.decorator_list = [
+        decorator for decorator in node.decorator_list
+        if "instrument_function" not in ast.unparse(decorator)
+    ]
+
+    tree = TaintASTTransformer().visit(tree)
+
+    ast.increment_lineno(tree, function.__code__.co_firstlineno - 1)
+    ast.fix_missing_locations(tree)
+
+    code = compile(
+        tree, inspect.getsourcefile(function) or "<instrumented>", "exec",
+        dont_inherit=True
+    )
+
+    vars(builtins).update(RUNTIME_HELPERS)
+
+    namespace = function.__globals__
+    name = function.__name__
+    missing = object()
+    previous = namespace.get(name, missing)
+
+    exec(code, namespace)             # имя временно перезаписывается
+
+    result = namespace[name]
+
+    if previous is missing:
+        del namespace[name]
+
+    else:
+        namespace[name] = previous
+
+    return result
+
+
 # ============================================================
 # Import hook
 #
-# Инструментирует модули при обычном `import`, поэтому работает
-# совместно с atheris.instrument_imports() и с пакетами.
+# Как это устроено и почему именно так
+# ------------------------------------
+# Atheris (instrument_imports) опрашивает остальные finder'ы, но затем
+# ПОДМЕНЯЕТ loader своим AtherisSourceFileLoader, пересоздавая его только
+# из name и path. Любой наш собственный loader при этом теряется, и модуль
+# компилируется без taint-инструментации.
+#
+# Поэтому finder только ЗАПОМИНАЕТ путь целевого модуля, а инструментацию
+# выполняет единственный патч SourceFileLoader.get_code — его наследуют и
+# обычный loader, и loader Atheris (его get_code вызывает super().get_code()
+# и затем добавляет coverage-инструментацию к УЖЕ преобразованному коду).
+# Для целевых модулей кэш __pycache__ не используется: иначе подхватился
+# бы валидный .pyc без инструментации.
 # ============================================================
 
 # Свои пакеты и сам atheris не инструментируем.
 _OWN_ROOTS = frozenset({__name__.split(".")[0], "atheris"})
 
+_TARGET_PATHS: set[str] = set()
+_loader_patched = False
 
-class _TaintSourceLoader(SourceFileLoader):
 
+def _patch_source_loader() -> None:
+
+    global _loader_patched
+
+    if _loader_patched:
+        return
+
+    original = SourceFileLoader.get_code
+
+    @wraps(original)
     def get_code(self, fullname):
-        # Намеренно без __pycache__: иначе инструментированный байткод
-        # попал бы в кэш (и наоборот — подхватился бы чужой).
+
         path = self.get_filename(fullname)
 
-        return self.source_to_code(self.get_data(path), path)
+        if path in _TARGET_PATHS:
+            return instrument_source(self.get_data(path), str(path))
 
-    def source_to_code(self, data, path, *, _optimize=-1):
+        return original(self, fullname)
 
-        return instrument_source(data, str(path))
+    SourceFileLoader.get_code = get_code
 
-    def exec_module(self, module):
-
-        vars(module).update(RUNTIME_HELPERS)
-
-        super().exec_module(module)
+    _loader_patched = True
 
 
 class TaintInstrumentationFinder(MetaPathFinder):
@@ -335,6 +421,7 @@ class TaintInstrumentationFinder(MetaPathFinder):
     def __init__(self, modules: Iterable[str] | None = None) -> None:
 
         self._names = None if modules is None else tuple(modules)
+        self.paths: set[str] = set()
 
     def _matches(self, fullname: str) -> bool:
 
@@ -361,10 +448,10 @@ class TaintInstrumentationFinder(MetaPathFinder):
         if spec is None or not isinstance(spec.loader, SourceFileLoader):
             return None
 
-        spec.loader = _TaintSourceLoader(
-            spec.loader.name,
-            spec.loader.path
-        )
+        origin = spec.loader.path
+
+        self.paths.add(origin)
+        _TARGET_PATHS.add(origin)
 
         return spec
 
@@ -380,6 +467,12 @@ def install_taint_import_hook(
 
     finder = TaintInstrumentationFinder(modules)
 
+    # Хелперы доступны через builtins, а не через globals модуля: код
+    # выполняет тот loader, который выберет Atheris.
+    vars(builtins).update(RUNTIME_HELPERS)
+
+    _patch_source_loader()
+
     sys.meta_path.insert(0, finder)
 
     return finder
@@ -389,3 +482,5 @@ def remove_taint_import_hook(finder: TaintInstrumentationFinder) -> None:
 
     if finder in sys.meta_path:
         sys.meta_path.remove(finder)
+
+    _TARGET_PATHS.difference_update(finder.paths)

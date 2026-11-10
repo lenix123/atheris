@@ -38,7 +38,7 @@ class SSRF(SanitizerIssue):
     pass
 
 
-def _url_issue(url: Any) -> str | None:
+def find_url_issue(url: Any) -> str | None:
 
     if isinstance(url, bytes):
         return "tainted URL" if contains_taint(url) else None
@@ -103,11 +103,11 @@ def install() -> None:
     )
 
     guard_function(
-        urllib.request, "urlopen", SSRF, _url_issue,
+        urllib.request, "urlopen", SSRF, find_url_issue,
         argpos=0, kwname="url"
     )
     guard_function(
-        urllib.request.Request, "__init__", SSRF, _url_issue,
+        urllib.request.Request, "__init__", SSRF, find_url_issue,
         argpos=1, kwname="url", sink="urllib.request.Request"
     )
     guard_function(
@@ -124,6 +124,6 @@ def install() -> None:
             return
 
         guard_function(
-            sessions.Session, "request", SSRF, _url_issue,
+            sessions.Session, "request", SSRF, find_url_issue,
             argpos=2, kwname="url", sink="requests.Session.request"
         )

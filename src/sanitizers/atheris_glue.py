@@ -24,11 +24,14 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 from functools import wraps
 from types import ModuleType
 from typing import Any
 
-from . import install, installed
+from . import ENV_VAR, install, installed
 from .dictionary import with_dictionary
 from .instrumentation import (
     install_taint_import_hook,
@@ -152,7 +155,13 @@ def install_into(atheris: ModuleType) -> list[str]:
     names = install()
 
     if not names:
+        print(
+            f"[SANITIZER] DISABLED: {ENV_VAR}={os.environ.get(ENV_VAR)!r}",
+            file=sys.stderr, flush=True
+        )
         return []
+
+    print(f"[SANITIZER] enabled: {','.join(names)}", file=sys.stderr, flush=True)
 
     _patch_setup(atheris, names)
     _patch_data_provider(atheris)

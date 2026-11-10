@@ -16,6 +16,7 @@ import base64
 import binascii
 import json
 import os.path
+import re
 import urllib.parse
 
 from functools import wraps
@@ -101,3 +102,8 @@ def install() -> None:
     ))
 
     _patch_functions(json, ("loads",))
+
+    # Результат подстановок/разбиения содержит данные из string и repl.
+    # Не моделируются: re.match/search (Match-объекты) и методы
+    # скомпилированных Pattern (C-тип, методы не подменить).
+    _patch_functions(re, ("sub", "subn", "split", "findall"))

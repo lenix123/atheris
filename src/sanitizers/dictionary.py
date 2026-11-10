@@ -19,6 +19,10 @@ TOKENS: dict[str, tuple[bytes, ...]] = {
         b"; id", b"| id", b"&& id", b"$(id)", b"`id`", b"\n id",
         b"'; id; '",
     ),
+    "code": (
+        b"__import__('os').system('id')", b"__import__", b"().__class__",
+        b"exec(", b"eval(", b"open('/etc/passwd')",
+    ),
     "path": (
         b"../", b"..\\", b"../../", b"....//", b"/etc/passwd", b"..",
     ),
@@ -30,6 +34,15 @@ TOKENS: dict[str, tuple[bytes, ...]] = {
         b"http://127.0.0.1", b"http://localhost", b"file:///etc/passwd",
         b"http://169.254.169.254/", b"gopher://", b"//",
     ),
+    "native": (b"libc.so.6", b"../", b"system"),
+    "env": (b"LD_PRELOAD", b"PATH", b"PYTHONPATH", b"BASH_ENV"),
+    "import": (b"os", b"posix", b"subprocess", b"ctypes", b"pickle"),
+    "browser": (b"file:///etc/passwd", b"javascript:", b"//"),
+    "template": (
+        b"{{7*7}}", b"{{config}}", b"{{''.__class__}}", b"{% for x in y %}",
+        b"${7*7}", b"<%= 7*7 %>",
+    ),
+    "format": (b"{0.__class__}", b"{0[0]}", b"{a.__dict__}", b"{0.__init__.__globals__}"),
     "deserialization": (
         b"\x80\x04", b"cos\nsystem\n", b"\x80\x05\x95",
     ),

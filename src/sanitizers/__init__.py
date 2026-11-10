@@ -8,7 +8,9 @@ Taint-санитайзеры для Atheris.
 
     (не задана) / all   — все
     none                — выключить
-    command,path,sql    — только перечисленные
+    command,path,code   — только перечисленные
+    (имена: command code path sql deserialization ssrf native env import
+     browser template format)
 """
 
 from __future__ import annotations
@@ -17,7 +19,12 @@ import os
 
 from collections.abc import Iterable
 
-from . import command, deserialization, models, path, sql, ssrf, code_injection
+from . import (
+    browser, code_injection, command, deserialization, dynamic_import,
+    environment, format_injection, models, native, path, sql, ssrf,
+    template_injection,
+)
+from .instrumentation import instrument_function
 from .core import STATS, SanitizerIssue, guard_function, reset, set_stream
 from .taint import (
     contains_taint,
@@ -32,11 +39,17 @@ ENV_VAR = "ATHERIS_SANITIZERS"
 
 SANITIZERS = {
     "command": command.install,
+    "code": code_injection.install,
     "path": path.install,
     "sql": sql.install,
     "deserialization": deserialization.install,
     "ssrf": ssrf.install,
-    "code": code_injection.install,
+    "native": native.install,
+    "env": environment.install,
+    "import": dynamic_import.install,
+    "browser": browser.install,
+    "template": template_injection.install,
+    "format": format_injection.install,
 }
 
 _installed: list[str] = []
